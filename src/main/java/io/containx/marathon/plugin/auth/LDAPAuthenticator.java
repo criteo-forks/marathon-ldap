@@ -34,7 +34,7 @@ import javax.naming.NamingException;
 public class LDAPAuthenticator implements Authenticator, PluginConfiguration {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LDAPAuthenticator.class);
-    public static final ConfigUpdaterTask configUpdaterTask = new ConfigUpdaterTask();
+    private AccessRulesUpdaterTask accessRulesUpdaterTask;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     private final long DEFAULT_INTERVAL_IN_SECONDS = 60;
     private long refreshInterval = DEFAULT_INTERVAL_IN_SECONDS;
@@ -61,7 +61,7 @@ public class LDAPAuthenticator implements Authenticator, PluginConfiguration {
         USERS = CacheBuilder.newBuilder()
                 .maximumSize(2000)
                 .expireAfterWrite(60, TimeUnit.MINUTES)
-                .refreshAfterWrite(refreshInterval + 2, TimeUnit.SECONDS)
+                .refreshAfterWrite(refreshInterval, TimeUnit.SECONDS)
                 .build(
                         CacheLoader.asyncReloading(
                                 new CacheLoader<AuthKey, UserIdentity>() {
@@ -77,9 +77,9 @@ public class LDAPAuthenticator implements Authenticator, PluginConfiguration {
                 );
         try {
             config = new ObjectMapper().readValue(jsObject.toString(), Configuration.class);
-            configUpdaterTask.initialize(config);
             if(config.getLdap().getRulesUpdaterBindUser() != null ) {
-                scheduler.scheduleAtFixedRate(configUpdaterTask, 0, refreshInterval, TimeUnit.SECONDS);
+                accessRulesUpdaterTask = new AccessRulesUpdaterTask(config);
+                scheduler.scheduleAtFixedRate(accessRulesUpdaterTask, 0, refreshInterval, TimeUnit.SECONDS);
             }
         } catch (Exception e) {
             LOGGER.error("Error reading configuration JSON: {}", e.getMessage(), e);
@@ -93,8 +93,9 @@ public class LDAPAuthenticator implements Authenticator, PluginConfiguration {
 
     private Identity doAuth(HttpRequest request) {
         try {
-            config = configUpdaterTask.getConfig();
-
+            if(accessRulesUpdaterTask != null) {
+                config.setAuthorization(accessRulesUpdaterTask.getAccessRules());
+            }
             AuthKey ak = HTTPHelper.authKeyFromHeaders(request);
             if (ak != null) {
 
@@ -126,6 +127,10 @@ public class LDAPAuthenticator implements Authenticator, PluginConfiguration {
     private Identity doAuth(String username, String password) throws NamingException {
         int count = 0;
         int maxTries = 5;
+
+        if(accessRulesUpdaterTask != null) {
+            config.setAuthorization(accessRulesUpdaterTask.getAccessRules());
+        }
 
         while(true) {
             try {

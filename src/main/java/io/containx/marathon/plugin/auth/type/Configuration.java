@@ -45,11 +45,6 @@ public class Configuration {
         this.authorization = authorization;
     }
 
-    public Configuration setAuthorizationAndGet(Authorization authorization) {
-        this.setAuthorization(authorization);
-        return this;
-    }
-
     public boolean hasStaticUser(String username) {
         return userCache().containsKey(username);
     }
